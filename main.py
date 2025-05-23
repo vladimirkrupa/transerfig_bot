@@ -1,14 +1,18 @@
 import os
 from aiogram import Bot, Dispatcher, executor, types
-from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
+from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.dispatcher.filters import Text
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from datetime import datetime
+import json
 
-# Получаем токен из переменных окружения
+# Получаем токен из Render
 TOKEN = os.getenv("BOT_TOKEN")
 bot = Bot(token=TOKEN)
 dp = Dispatcher(bot)
+scheduler = AsyncIOScheduler()
 
-# Telegram ID администратора
+# ID администратора (замени на свой Telegram ID)
 ADMIN_ID = 1359055991
 
 # Вопросы
@@ -21,7 +25,7 @@ questions = [
     "Что ты отпустишь, чтобы чувствовать себя лучше?"
 ]
 
-# Мотивационные цитаты
+# Цитаты
 quotes = [
     "“Успех — это результат правильного мышления.” — Джим Рон",
     "“Богатые люди фокусируются на возможности. Бедные — на препятствиях.” — Т. Харв Экер",
@@ -31,72 +35,84 @@ quotes = [
 
 # Состояние пользователя
 user_states = {}
-user_answers = {}
+user_data = {}  # id: {"name": ..., "phone": ..., "answers": {"дата": [(вопрос, ответ)]}}
 
-# Сохраняем ID пользователя
-def save_user(user_id):
-    if not os.path.exists("users.txt"):
-        with open("users.txt", "w") as f:
-            f.write(f"{user_id}\n")
-    else:
-        with open("users.txt", "r") as f:
-            users = f.read().splitlines()
-        if str(user_id) not in users:
-            with open("users.txt", "a") as f:
-                f.write(f"{user_id}\n")
+# Кнопки
+contact_btn = KeyboardButton("Поделиться контактом", request_contact=True)
+contact_kb = ReplyKeyboardMarkup(resize_keyboard=True).add(contact_btn)
 
 # Старт
 @dp.message_handler(commands=["start"])
-async def start_cmd(message: types.Message):
-    user_id = message.from_user.id
-    save_user(user_id)
-    user_states[user_id] = 0
-    user_answers[user_id] = []
-    await message.answer("Добро пожаловать в дневник намерений. Начнём утренние вопросы:")
+async def cmd_start(message: types.Message):
+    uid = message.from_user.id
+    user_states[uid] = 0
+    name = message.from_user.full_name
+    if uid not in user_data:
+        user_data[uid] = {"name": name, "phone": "", "answers": {}}
+    await message.answer("Пожалуйста, поделись номером телефона:", reply_markup=contact_kb)
+
+@dp.message_handler(content_types=types.ContentType.CONTACT)
+async def contact_handler(message: types.Message):
+    uid = message.from_user.id
+    user_data[uid]["phone"] = message.contact.phone_number
+    await message.answer("Спасибо! Начнем утренние вопросы:", reply_markup=types.ReplyKeyboardRemove())
     await message.answer(questions[0])
 
-# Админ-панель
-@dp.message_handler(lambda message: message.text.lower() == "admin")
-async def admin_panel(message: types.Message):
-    if message.from_user.id == ADMIN_ID:
-        if os.path.exists("users.txt"):
-            with open("users.txt", "r") as f:
-                users = f.read().strip().split("\n")
-            user_list = "\n".join(users)
-            await message.answer(f"Пользователи:\n{user_list}")
-        else:
-            await message.answer("Пользователи пока не зарегистрированы.")
-    else:
-        await message.answer("У тебя нет доступа к админ-панели.")
-
-# Ответ на вопрос
-@dp.message_handler()
-async def handle_answer(message: types.Message):
+@dp.message_handler(lambda m: m.from_user.id in user_states)
+async def answer_handler(message: types.Message):
     uid = message.from_user.id
-    if uid not in user_states:
-        await message.answer("Напиши /start, чтобы начать.")
-        return
-
-    q_index = user_states[uid]
-    user_answers[uid].append((questions[q_index], message.text))
-    user_states[uid] += 1
-
-    if user_states[uid] < len(questions):
-        await message.answer(questions[user_states[uid]])
+    index = user_states[uid]
+    today = datetime.now().strftime("%Y-%m-%d")
+    if today not in user_data[uid]["answers"]:
+        user_data[uid]["answers"][today] = []
+    user_data[uid]["answers"][today].append((questions[index], message.text))
+    index += 1
+    if index < len(questions):
+        user_states[uid] = index
+        await message.answer(questions[index])
     else:
-        await message.answer("Спасибо за ответы. Вот мотивация на день:")
-        await message.answer(quotes[q_index % len(quotes)])
-
-        # Сохраняем в файл
-        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        with open(f"{uid}_log.txt", "a", encoding="utf-8") as f:
-            f.write(f"\n--- {now} ---\n")
-            for q, a in user_answers[uid]:
-                f.write(f"{q}\nОтвет: {a}\n")
-
+        await message.answer("Спасибо! Вот цитата на день:")
+        await message.answer(quotes[index % len(quotes)])
         user_states.pop(uid)
-        user_answers.pop(uid)
 
-# Запуск бота
+# Админ-панель
+@dp.message_handler(lambda m: m.from_user.id == ADMIN_ID and m.text.lower() == "admin")
+async def admin_panel(message: types.Message):
+    kb = InlineKeyboardMarkup(row_width=1)
+    for uid in user_data:
+        name = user_data[uid]["name"]
+        kb.add(InlineKeyboardButton(f"{name}", callback_data=f"user_{uid}"))
+    await message.answer("Список пользователей:", reply_markup=kb)
+
+@dp.callback_query_handler(lambda c: c.data.startswith("user_"))
+async def show_user_data(callback: types.CallbackQuery):
+    uid = int(callback.data.split("_")[1])
+    data = user_data[uid]
+    text = f"👤 {data['name']}\n📞 {data['phone']}\n"
+    for date, entries in data["answers"].items():
+        text += f"\n📅 {date}:\n"
+        for q, a in entries:
+            text += f"{q}\nОтвет: {a}\n"
+    await callback.message.answer(text[:4096])  # Telegram limit
+
+# Рассылка утром и вечером
+async def send_daily_questions():
+    for uid in user_data:
+        user_states[uid] = 0
+        await bot.send_message(uid, "Доброе утро! Пришло время вопросов:")
+        await bot.send_message(uid, questions[0])
+
+async def send_evening_questions():
+    for uid in user_data:
+        user_states[uid] = 0
+        await bot.send_message(uid, "Добрый вечер! Пришло время вопросов:")
+        await bot.send_message(uid, questions[0])
+
+# Планировщик
+scheduler.add_job(send_daily_questions, "cron", hour=6, minute=0)
+scheduler.add_job(send_evening_questions, "cron", hour=20, minute=30)
+scheduler.start()
+
+# Запуск
 if __name__ == "__main__":
     executor.start_polling(dp, skip_updates=True)
