@@ -11,7 +11,7 @@ bot = Bot(token=TOKEN)
 dp = Dispatcher(bot)
 
 # Telegram username администратора
-ADMIN_USERNAME = "vladimir_tehnik"
+ADMIN_ID = 1359055991
 
 # Вопросы
 questions = [
@@ -46,7 +46,7 @@ async def start_cmd(message: types.Message):
 # Админ-панель
 @dp.message_handler(commands=["admin"])
 async def admin_panel(message: types.Message):
-    if message.from_user.username != ADMIN_USERNAME:
+    if message.from_user.username != ADMIN_ID:
         await message.answer("У вас нет доступа к этой команде.")
         return
 
