@@ -59,16 +59,14 @@ async def handle_answer(message: types.Message):
         await message.answer("Спасибо за ответы. Вот мотивация на день:")
         await message.answer(quotes[q_index % len(quotes)])
 
-       # Сохраняем в файл
+     # Сохраняем в файл
 now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-with open(f"{uid}_log.txt", "a", encoding="utf-8") as f:
+user_id = message.from_user.id  # или используйте ту переменную, что используется у вас в коде
+
+with open(f"{user_id}_log.txt", "a", encoding="utf-8") as f:
     f.write(f"\n--- {now} ---\n")
-    for q, a in user_answers[uid]:
+    for q, a in user_answers[user_id]:
         f.write(f"{q}\nОтвет: {a}\n")
 
-user_states.pop(uid)
-user_answers.pop(uid)
-
-# Запуск
-if name == '__main__':
-    executor.start_polling(dp, skip_updates=True)
+user_states.pop(user_id)
+user_answers.pop(user_id)
