@@ -1,13 +1,9 @@
-
 import os
 from aiogram import Bot, Dispatcher, executor, types
-from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
 from datetime import datetime
-import asyncio
+import random
 
-# Получаем токен из переменных окружения
 TOKEN = os.getenv("BOT_TOKEN")
-
 bot = Bot(token=TOKEN)
 dp = Dispatcher(bot)
 
@@ -36,12 +32,13 @@ user_answers = {}
 # Старт
 @dp.message_handler(commands=["start"])
 async def start_cmd(message: types.Message):
-    user_states[message.from_user.id] = 0
-    user_answers[message.from_user.id] = []
+    uid = message.from_user.id
+    user_states[uid] = 0
+    user_answers[uid] = []
     await message.answer("Добро пожаловать в дневник намерений. Начнём утренние вопросы:")
     await message.answer(questions[0])
 
-# Ответ на вопрос
+# Ответ
 @dp.message_handler()
 async def handle_answer(message: types.Message):
     uid = message.from_user.id
@@ -57,16 +54,18 @@ async def handle_answer(message: types.Message):
         await message.answer(questions[user_states[uid]])
     else:
         await message.answer("Спасибо за ответы. Вот мотивация на день:")
-        await message.answer(quotes[q_index % len(quotes)])
+        await message.answer(random.choice(quotes))
 
-     # Сохраняем в файл
-now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-user_id = message.from_user.id  # или используйте ту переменную, что используется у вас в коде
+        # Сохраняем в файл
+        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        with open(f"{uid}_log.txt", "a", encoding="utf-8") as f:
+            f.write(f"\n--- {now} ---\n")
+            for q, a in user_answers[uid]:
+                f.write(f"{q}\nОтвет: {a}\n")
 
-with open(f"{user_id}_log.txt", "a", encoding="utf-8") as f:
-    f.write(f"\n--- {now} ---\n")
-    for q, a in user_answers[user_id]:
-        f.write(f"{q}\nОтвет: {a}\n")
+        user_states.pop(uid)
+        user_answers.pop(uid)
 
-user_states.pop(user_id)
-user_answers.pop(user_id)
+# Запуск
+if __name__ == "__main__":
+    executor.start_polling(dp, skip_updates=True)
