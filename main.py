@@ -98,5 +98,5 @@ async def handle_answer(message: types.Message):
         user_answers.pop(uid)
 
 # Запуск бота
-if name == "__main__":
+if __name__ == "__main__":
     executor.start_polling(dp, skip_updates=True)
